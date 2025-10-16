@@ -2,6 +2,7 @@
 /rawdata/plasma/*
 /output/*.RData
 /output/data/*
+/archive/* 
 
 # History files
 .Rhistory
