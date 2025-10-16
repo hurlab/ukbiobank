@@ -776,7 +776,8 @@ marker_files <- c(
   "Stephanie-DRG.csv",
   "Stephanie-Nerve.csv",
   "Stephanie-SC.csv",
-  "Chen-Average-ORs.csv"
+  "Chen-Average-ORs.csv",
+  "HumanGeneSymbol-MouseGeneSymbol.csv"  # SenMayo panel
 )
 
 ## -----------------------------------------------------------------------------
@@ -854,18 +855,59 @@ plot_upset_regular <- function(named_lists, prefix, out_dir_figs, set_colors = N
   message("Saved UpSet: ", file.path(out_dir_figs, paste0(prefix, "_UpSetR.png")))
 }
 
-# Volcano highlighting helper
+# # Volcano highlighting helper
+# plot_highlighted_volcano <- function(volcano_df, highlight_genes, title_tag, out_png, xlim = c(-2, 2)) {
+#   highlight_genes <- unique(highlight_genes)
+#   volc <- volcano_df %>%
+#     mutate(set_flag = ifelse(Protein %in% highlight_genes, "In set", "Other"))
+#   p <- ggplot(volc, aes(x = estimate, y = neg_log10Padj)) +
+#     geom_point(data = subset(volc, set_flag == "Other"),
+#                color = "gray70", alpha = 0.6, size = 2) +
+#     geom_point(data = subset(volc, set_flag == "In set"),
+#                color = "dodgerblue3", alpha = 0.9, size = 2.2) +
+#     geom_text_repel(
+#       data = subset(volc, set_flag == "In set"),
+#       aes(label = Protein),
+#       size = 3.3,
+#       max.overlaps = 50,
+#       box.padding = 0.35,
+#       point.padding = 0.25,
+#       segment.color = "gray50"
+#     ) +
+#     geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+#     geom_vline(xintercept = 0, linetype = "solid", color = "black") +
+#     coord_cartesian(xlim = xlim) +
+#     labs(
+#       title = paste0("Volcano: DN vs nonDN [", title_tag, " highlighted]"),
+#       x = "log2 fold change (DN / nonDN)",
+#       y = "-log10(FDR-adjusted p-value)"
+#     ) +
+#     theme_bw(base_size = 13) +
+#     theme(legend.position = "none")
+#   ggsave(out_png, p, width = 8, height = 6, dpi = 300)
+#   message("Saved: ", out_png)
+# }
+
+# Volcano highlighting helper (only highlight significant ones)
 plot_highlighted_volcano <- function(volcano_df, highlight_genes, title_tag, out_png, xlim = c(-2, 2)) {
   highlight_genes <- unique(highlight_genes)
+  
   volc <- volcano_df %>%
-    mutate(set_flag = ifelse(Protein %in% highlight_genes, "In set", "Other"))
+    mutate(
+      sig_flag = Padj < 0.05,
+      set_flag = case_when(
+        Protein %in% highlight_genes & sig_flag ~ "In set (sig)",
+        TRUE ~ "Other"
+      )
+    )
+  
   p <- ggplot(volc, aes(x = estimate, y = neg_log10Padj)) +
     geom_point(data = subset(volc, set_flag == "Other"),
                color = "gray70", alpha = 0.6, size = 2) +
-    geom_point(data = subset(volc, set_flag == "In set"),
+    geom_point(data = subset(volc, set_flag == "In set (sig)"),
                color = "dodgerblue3", alpha = 0.9, size = 2.2) +
     geom_text_repel(
-      data = subset(volc, set_flag == "In set"),
+      data = subset(volc, set_flag == "In set (sig)"),
       aes(label = Protein),
       size = 3.3,
       max.overlaps = 50,
@@ -883,9 +925,11 @@ plot_highlighted_volcano <- function(volcano_df, highlight_genes, title_tag, out
     ) +
     theme_bw(base_size = 13) +
     theme(legend.position = "none")
+  
   ggsave(out_png, p, width = 8, height = 6, dpi = 300)
   message("Saved: ", out_png)
 }
+
 
 # Simple writer for overlap tables
 write_overlap <- function(gene_vec, sig_vec, out_path) {
@@ -907,6 +951,10 @@ for (f in marker_files) {
   gene_sets[[key]] <- genes
 }
 
+## Change the name for HumanGeneSymbol-MouseGeneSymbol" -> "SenMayo"
+names(gene_sets)[names(gene_sets) == "HumanGeneSymbol-MouseGeneSymbol"] <- "SenMayo"
+
+
 ## -----------------------------------------------------------------------------
 ## 2) Build significant list from results
 ## -----------------------------------------------------------------------------
@@ -923,9 +971,12 @@ steph_sets <- list(
 )
 senescence_genes   <- unique(unlist(steph_sets))
 ieu_openGWAS_genes <- gene_sets[["Chen-Average-ORs"]]
+senmayo_genes   <- gene_sets[["SenMayo"]]
+
 
 senescence_in_results <- intersect(senescence_genes, volcano_df$Protein)
 ieu_in_results        <- intersect(ieu_openGWAS_genes, volcano_df$Protein)
+senmayo_in_results        <- intersect(senmayo_genes, volcano_df$Protein)
 
 ## -----------------------------------------------------------------------------
 ## 4) Venn and UpSet for overlaps
@@ -961,6 +1012,9 @@ plot_highlighted_volcano(volcano_df, senescence_in_results, "Senescence (Stephan
 png_ieu <- file.path(out_dir, "figs", "volcano_highlight_IEU-OpenGWAS.png")
 plot_highlighted_volcano(volcano_df, ieu_in_results, "IEU-OpenGWAS", png_ieu)
 
+png_senmayo <- file.path(out_dir, "figs", "volcano_highlight_SenMayo.png")
+plot_highlighted_volcano(volcano_df, senmayo_in_results, "SenMayo", png_senmayo)
+
 ## -----------------------------------------------------------------------------
 ## 6) Save overlap tables
 ## -----------------------------------------------------------------------------
@@ -972,6 +1026,9 @@ write_overlap(senescence_in_results, sig_genes,
 
 write_overlap(ieu_in_results, sig_genes,
               file.path(overlap_dir, "IEU-OpenGWAS_overlap_in_results.csv"))
+
+write_overlap(senmayo_in_results, sig_genes,
+              file.path(overlap_dir, "SenMayo_overlap_in_results.csv"))
 
 
 
@@ -1095,6 +1152,30 @@ fig_ieu        <- file.path(out_dir, "figs", "violin_IEU-OpenGWAS_overlap_DN_vs_
 # Create the two panels
 plot_violin_for_genes(senescence_in_results, "Senescence (Stephanie union)", fig_senescence, ncol = 2)
 plot_violin_for_genes(ieu_in_results, "IEU-OpenGWAS", fig_ieu, ncol = 2)
+
+
+# If not, also reconstruct SenMayo quickly:
+if (!exists("senmayo_in_results")) {
+  if (!exists("gene_sets")) stop("gene_sets object not found for SenMayo reconstruction")
+  if (!exists("volcano_df")) {
+    volcano_df <- final_results %>%
+      filter(!is.na(Padj), !is.na(estimate)) %>%
+      mutate(Padj_plot = pmax(Padj, 1e-300), neg_log10Padj = -log10(Padj_plot))
+  }
+  senmayo_genes <- gene_sets[["SenMayo"]]
+  senmayo_in_results <- intersect(senmayo_genes, volcano_df$Protein)
+}
+
+# Output file for SenMayo
+fig_senmayo <- file.path(out_dir, "figs", "violin_SenMayo_overlap_DN_vs_nonDN.png")
+
+# Create the SenMayo panel
+plot_violin_for_genes(senmayo_in_results, "SenMayo", fig_senmayo, ncol = 2)
+
+
+
+
+
 
 
 
